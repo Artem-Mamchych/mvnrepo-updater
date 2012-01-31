@@ -1,0 +1,16 @@
+mvnrepo-updater.py used for batch updating/redeploying maven artifacts on remote server or local machine
+Usage: mvnrepo-updater.py [-u|-U|-d] artifact_name_1 artifact_name_2#branch artifact_name_N
+
+Add github Read-Only/http/ssh urls to artifacts.txt file
+
+After that you cau use:
+mvnrepo-updater.py -u *
+ - to clone or update source code for all maven artifacts (which github Read-Only/http/ssh urls is added to artifacts.txt file)
+
+mvnrepo-updater.py -U artifact_name
+ - to update source code from upstream and rebase branch if current branch is not master
+
+mvnrepo-updater.py -d artifact_name
+ - to update source code from upstream and run mvn clean deploy
+ 
+In all cases * argument can be used to select all artifacts from artifacts.txt file
