@@ -33,10 +33,12 @@ def applicationStabilityTest():
     assert ro.baseUrl == 'github.com' and ro.organisation == 'Artem-Mamchych' and ro.name == 'python-utils', 'Artifact.parseScmUrl(git:url) is broken!'
     ssh = Artifact('git@github.com:Artem-Mamchych/python-utils.git')
     assert ssh.baseUrl == 'github.com' and ssh.organisation == 'Artem-Mamchych' and ssh.name == 'python-utils', 'Artifact.parseScmUrl(ssh_url) is broken!'
-    http = Artifact('https://github.com/SpringSource/spring-roo.git')
-    assert http.baseUrl == 'github.com' and http.organisation == 'SpringSource' and http.name == 'spring-roo', 'Artifact.parseScmUrl(https_url) is broken!'
-    assert http.getGitHubUrl() == "http://github.com/SpringSource/spring-roo"
-    assert http.getScmUrl() == "git://github.com/SpringSource/spring-roo.git"
+#    http = Artifact('https://github.com/SpringSource/spring-roo.git')
+#    assert http.baseUrl == 'github.com' and http.organisation == 'SpringSource' and http.name == 'spring-roo', 'Artifact.parseScmUrl(https_url) is broken!'
+#    assert http.getGitHubUrl() == "http://github.com/SpringSource/spring-roo"
+#    assert http.getScmUrl() == "git://github.com/SpringSource/spring-roo.git"
+    http2 = Artifact('https://Artem-Mamchych@github.com/Artem-Mamchych/mvnrepo-updater.git')
+    assert http2.baseUrl == 'github.com' and http2.organisation == 'Artem-Mamchych' and http2.name == 'mvnrepo-updater', 'Artifact.parseScmUrl(https_url) is broken!'
 
 def isGitRepo(dir):
     if isinstance(dir, Artifact):
@@ -227,8 +229,12 @@ class Artifact(object):
 
     @staticmethod
     def parseScmUrl(url):
-        url = url.replace('https://', '')
-        url = url.replace('http://', '')
+        if url.startswith('http'):
+            url2 = url.split('@')
+            if not len(url2) == 2:
+                fatal(url + " is unsupported http github url. Try to use SSH or Read-only url")
+                sys.exit()
+            url = url2[1]
         url = url.replace('.git', '')
         url = url.replace('git://', '')
         url = url.replace('git@', '')
@@ -238,7 +244,8 @@ class Artifact(object):
         if isinstance(out, list) and len(out) == 3:
             return out
         else:
-            return [None, None, None]
+            fatal("Failed to parse url: " + url)
+            sys.exit()
 
 class Action(object):
     name = None
