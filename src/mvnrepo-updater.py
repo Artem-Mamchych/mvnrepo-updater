@@ -12,6 +12,7 @@ import os.path
 version_string = "%s version: %s  Latest version available at:\n %s" % (sys.argv[0], str(version), latest_version_url)
 home_dir = os.getcwd()
 options = None
+maven_opts = " "
 log_file = None
 warnings = list()
 executed_commands = list()
@@ -45,6 +46,8 @@ def isUncommittedChangesExists():
     return call('git diff --exit-code --quiet', log=False)
 
 def getBranchName():
+    if options.echoMode:
+        return 'master'
     current_branch = callAndGetOutput('git symbolic-ref -q HEAD', log=False)
     if not current_branch.startswith("refs/heads/"):
         fatal('Failed to get current branch name in dir ' + os.getcwd())
@@ -56,22 +59,24 @@ def getBranchName():
 def isLocalBranchExists(branchName):
     return not call('git show-ref --verify --quiet refs/heads/"%s"' % branchName, log=False)
 
-def switchBranch(artifact, branch):
-    if not artifact.branch:
-        return True
-    if getBranchName() == branch: #Already on branch
+def switchBranch(artifact):
+    branch = artifact.branch
+    if not branch:
         return True
     if isUncommittedChangesExists():
         fatal(artifact.name + ' contains uncommitted changes. Failed to change branch')
         return False
     if branch:
-        if isLocalBranchExists(branch):
+        if artifact.remote == 'upstream' and isLocalBranchExists(branch):
             call('git checkout "%s"' % branch)
         else:
-            call('git checkout --track -b %s remotes/upstream/%s' % (branch,branch))
-        if not getBranchName() == branch:
-            fatal('Failed to change branch to: ' + branch + ' in ' + artifact.name)
-            return False
+            if artifact.remote != 'upstream':
+                call('git remote add %s %s' % (artifact.remote, artifact.getGitHubROUrl(artifact.remote)))
+            call('git fetch -v ' + artifact.remote)
+            call('git checkout -f --track -b "%s-%s" remotes/%s/%s' % (branch, artifact.remote, artifact.remote, branch))
+#        if not getBranchName() == branch:
+#            fatal('Failed to change branch to: ' + branch + ' in ' + artifact.name)
+#            return False
     return True
 
 def changeDir(artifact_home):
@@ -120,9 +125,31 @@ def listStatus(artifact):
         print(artifact.name)
         print("UNCOMMITTED FILES; Branch: "+ getBranchName())
 
+def isRemoteExists(remote):
+    remotes = callAndGetOutput('git remote show', log=False)
+    print("remotes " + remotes)
+    return remote in remotes
+
 def doAction(args):
     selection = list()
+    artifact_branch = "master"
     for arg in args:
+        if '@' in arg:
+            arg = arg.replace('#', '@')
+            if len(str.split(arg, '@')) == 2:
+                (artifactName, remote) = str.split(arg, '@')
+            else:
+                (artifactName, remote, branch) = str.split(arg, '@')
+                if branch:
+                    artifact_branch = branch
+            if not remote:
+                remote = options.github_username
+            target = Repository.resolveOne(artifactName)
+            target.remote = remote
+            target.branch = artifact_branch
+            warning('Using resolveOne() with custom remote and switch branch mode: %s@%s#%s' % (artifactName, target.remote, target.branch))
+            selection.append(target)
+
         if '#' in arg:
             (artifactName, branch) = str.split(arg, '#')
             if not branch:
@@ -153,6 +180,7 @@ class Artifact(object):
     organisation = None
     name = None
     customHomeDir = None
+    remote = 'upstream'
     branch = None
 
     #url format: 'git://#baseUrl#/#organisation#/#name#.git'
@@ -190,8 +218,15 @@ class Artifact(object):
     def getOrganisationDir(self):
         return self.organisation
 
-    def getGitHubUrl(self):
-        return "http://" + self.baseUrl + '/' + self.organisation + '/' + self.name
+    def getGitHubROUrl(self, organisation=None):
+        if not organisation:
+            organisation = self.organisation
+        return "git://" + self.baseUrl + '/' + organisation + '/' + self.name + '.git'
+
+    def getGitHubUrl(self, organisation=None):
+        if not organisation:
+            organisation = self.organisation
+        return "http://" + self.baseUrl + '/' + organisation + '/' + self.name
 
     def getScmUrl(self):
         return "git://" + self.baseUrl + '/' + self.organisation + '/' + self.name + ".git"
@@ -252,7 +287,7 @@ class Action(object):
                 options.debug_mode = False
             if self.printName:
                 print(artifact.name)
-            if switchBranch(artifact, artifact.branch):
+            if switchBranch(artifact):
                 self.callback(artifact)
             else:
                 fatal('Action skipped for ' + artifact.name + ' failed to switch branch!')
@@ -379,6 +414,7 @@ def maven(cmd):
         cmd = 'mvn.bat ' + cmd
     else:
         cmd = 'mvn ' + cmd
+    cmd += maven_opts
     if options.skipTests:
         cmd += ' -Dmaven.test.skip=true'
     call(cmd)
@@ -461,7 +497,6 @@ def main():
     addCliArgument(parser, "-c", "--clean",  help="Resolve all maven dependencies", action='-o clean')
 
     (parsed_options, args) = parser.parse_args()
-    print('parser.parse_args() args '  + str(len(args)))
     global options
     options = parsed_options
 
