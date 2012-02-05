@@ -457,6 +457,15 @@ def log2file(mesg):
         log_file = open(os.path.join(home_dir, '.mvnrepo-updater.log'), 'a')
     log_file.write("\n" + str(mesg))
 
+def showDetailedInfo(path=os.getcwd()):
+    for repo in Repository.artifacts:
+        if path.lower().startswith(repo.getAbsoluteLocationDir().lower()):
+            print("Location:")
+            print(repo.getAbsoluteLocationDir())
+            print(repo.getCurrentBranchGitHubUrl())
+            print("Logs:")
+            call('git --no-pager log --pretty=format:"%an %ar %B" -n 5')
+
 #Binds commandline key and longKey to callback function
 def addCliArgument(parser, key, longKey, help, action, silentMode=False, changedir=True, printName=False, gitUpdate=False):
     parser.add_option(key, longKey, action="store_const",
@@ -512,9 +521,11 @@ def main():
 
     import datetime
     now = datetime.datetime.now()
-    log2file('\n\t [%s]' % now.strftime("%Y-%m-%d %H:%M"))
-
+    log2file('\n\t[%s]' % now.strftime("%Y-%m-%d %H:%M"))
     initArtifacts()
+    if not len(args):
+        showDetailedInfo()
+        exit(0)
     doAction(args)
 
     log2file("options: " + str(options))
