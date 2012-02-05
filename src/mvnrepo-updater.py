@@ -1,5 +1,5 @@
 description='mvnrepo-updater.py used for batch updating/redeploying maven artifacts on remote server or local machine'
-version = 0.6
+version = 0.61
 usage = 'Usage: mvnrepo-updater.py [-u|-U|-d] project_name_1 project_name_2#branch project_name_N'
 latest_version_url = "https://raw.github.com/Artem-Mamchych/mvnrepo-updater/master/src/mvnrepo-updater.py"
 
@@ -11,14 +11,8 @@ import os.path
 
 version_string = "%s version: %s  Latest version available at:\n %s" % (sys.argv[0], str(version), latest_version_url)
 home_dir = os.getcwd()
+options = None
 log_file = None
-echoMode = False
-resetGitRepos = False
-action = None
-debug_mode = False
-rebase_mode = False
-skipTests = False
-github_username = None
 warnings = list()
 executed_commands = list()
 artifacts_file = 'artifacts.txt'
@@ -52,9 +46,9 @@ def isUncommittedChangesExists():
 
 def getBranchName():
     current_branch = callAndGetOutput('git symbolic-ref -q HEAD', log=False)
-#    if not current_branch.startswith("refs/heads/"):
-#        fatal('Failed to get current branch name in dir ' + os.getcwd())
-#        sys.exit(1)
+    if not current_branch.startswith("refs/heads/"):
+        fatal('Failed to get current branch name in dir ' + os.getcwd())
+        sys.exit(1)
     current_branch = current_branch.replace("refs/heads/","")
     current_branch = current_branch.rstrip()
     return current_branch
@@ -83,22 +77,22 @@ def switchBranch(artifact, branch):
 def changeDir(artifact_home):
     if isinstance(artifact_home, Artifact):
         artifact_home = artifact_home.getAbsoluteLocationDir()
-
     if not os.path.exists(artifact_home):
-        log("Creating dir: " + artifact_home)
         os.makedirs(artifact_home)
     os.chdir(artifact_home)
-    log("We are in " + os.path.realpath('.'))
+    if options and options.debug_mode:
+        log("We are in " + os.path.realpath('.'))
 
 def gitCloneOrUpdate(repo):
+    changeDir(repo)
     if not isGitRepo(repo):
         log("Cloning repo: " + repo.getScmUrl() + ' into ' + os.getcwd())
-        call('git clone --verbose ' + repo.getScmUrl() + ' .')
+        call('git clone --progress -v ' + repo.getScmUrl() + ' .')
         call('git remote rename origin upstream')
-        if github_username:
-            call('git remote add %s %s' % (github_username, repo.getSshForkUrl()) )
+        if options.github_username:
+            call('git remote add %s %s' % (options.github_username, repo.getSshForkUrl()) )
     else:
-        #gitReset(repo)
+        gitReset(repo)
         if isUncommittedChangesExists():
             warning(repo.getLocationDir() + " contains uncommitted changes, update skipped!")
         else:
@@ -110,30 +104,16 @@ def gitCloneOrUpdate(repo):
                 call('git checkout master')
                 call('git pull ' + repo.getScmUrl())
                 call('git checkout ' + current_branch)
-                if rebase_mode:
+                if options.rebase:
                     call('git rebase master')
                 else:
                     warning(repo.getLocationDir() + " is updated. Rebase your branches. (git rebase master)")
 
-def gitUpdateAndRebase(artifact):
-    global rebase_mode
-    rebase_mode = True
-    gitCloneOrUpdate(artifact)
-
 def gitReset(repo):
-    if resetGitRepos and isGitRepo(repo):
+    if options.resetGitRepos and isGitRepo(repo):
         if isUncommittedChangesExists():
             call('git diff > reverted_changes.diff')
         call('echo git reset --hard')
-
-def gitInfo(artifact):
-    call('git --no-pager log --pretty=format:"%an %ar %B" -n 1')
-
-def listAction(artifact):
-    print(artifact.getAbsoluteLocationDir())
-
-def listBranch(artifact):
-    print(artifact.getCurrentBranchGitHubUrl())
 
 def listStatus(artifact):
     if isUncommittedChangesExists():
@@ -156,14 +136,17 @@ def doAction(args):
     if not selection:
         warning("0 artifacts selected")
         return
-    print("doAction() will be executed on the following artifacts:")
+    if options.action:
+        print(options.action + " will be executed on the following artifacts:")
     for arg in selection:
         print(arg.name)
 
     for artifact in selection:
-        Repository.applyAction(action, artifact)
+        if options.update or options.rebase:
+            gitCloneOrUpdate(artifact)
+        if options.action:
+            Repository.applyAction(options.action, artifact)
 
-#Classes:
 #Maven Artifact
 class Artifact(object):
     baseUrl = None
@@ -214,17 +197,17 @@ class Artifact(object):
         return "git://" + self.baseUrl + '/' + self.organisation + '/' + self.name + ".git"
 
     def getGitHubForkUrl(self):
-        if github_username:
-            return "http://" + self.baseUrl + '/' + github_username + '/' + self.name
+        if options.github_username:
+            return "http://" + self.baseUrl + '/' + options.github_username + '/' + self.name
 
     def getSshForkUrl(self):
-        if github_username:
-            return "git@" + self.baseUrl + ':' + github_username + '/' + self.name + ".git"
+        if options.github_username:
+            return "git@" + self.baseUrl + ':' + options.github_username + '/' + self.name + ".git"
 
     def getCurrentBranchGitHubUrl(self):
         fork = self.organisation
-        if github_username:
-            fork = github_username
+        if options.github_username:
+            fork = options.github_username
         return "http://" + self.baseUrl + '/' + fork + '/' + self.name + '/commits/' + getBranchName()
 
     @staticmethod
@@ -266,7 +249,7 @@ class Action(object):
             if self.changedir:
                 changeDir(artifact)
             if self.silentMode:
-                silentMode()
+                options.debug_mode = False
             if self.printName:
                 print(artifact.name)
             if switchBranch(artifact, artifact.branch):
@@ -362,7 +345,7 @@ class Repository(object):
 def callAndGetOutput(cmd, log=True):
     if log:
         logExecutedCommand(cmd)
-    if echoMode:
+    if options.echoMode:
         return ""
 
     try:
@@ -384,7 +367,7 @@ def callAndGetOutput(cmd, log=True):
 def call(cmd, log=True):
     if log:
         logExecutedCommand(cmd)
-    if not echoMode:
+    if not options.echoMode:
         try:
             return subprocess.call(cmd, shell=True)
         except Exception:
@@ -396,7 +379,7 @@ def maven(cmd):
         cmd = 'mvn.bat ' + cmd
     else:
         cmd = 'mvn ' + cmd
-    if skipTests:
+    if options.skipTests:
         cmd += ' -Dmaven.test.skip=true'
     call(cmd)
 
@@ -406,12 +389,8 @@ def fatal(mesg):
 
 def log(mesg):
     log2file('[DEBUG] ' + mesg)
-    if debug_mode:
+    if options.debug_mode:
         print(mesg)
-
-def silentMode():
-    global debug_mode
-    debug_mode = False
 
 #All warning messages are cached and will be printed only on showWarnings() call
 def warning(mesg):
@@ -442,10 +421,19 @@ def log2file(mesg):
         log_file = open(os.path.join(home_dir, '.mvnrepo-updater.log'), 'a')
     log_file.write("\n" + str(mesg))
 
+#Binds commandline key and longKey to callback function
+def addCliArgument(parser, key, longKey, help, action, silentMode=False, changedir=True, printName=False, gitUpdate=False):
+    parser.add_option(key, longKey, action="store_const",
+        const=longKey, dest="action", help=help)
+    if isinstance(action, str):
+        Repository.addAction(MavenGoal(longKey, action, gitUpdate=gitUpdate))
+    else:
+        Repository.addAction(Action(longKey, action, silentMode=silentMode, changedir=changedir, printName=printName))
+
 def main():
     from optparse import OptionParser
     parser = OptionParser(usage=usage, description=description, version=version_string)
-    parser.add_option("-D", "--Debug", action="store_true", dest="debug", default=False,
+    parser.add_option("-D", "--Debug", action="store_true", dest="debug_mode", default=False,
         help="Debug mode (Shows debug messages)")
     parser.add_option("-S", "--skip-tests", action="store_true", dest="skipTests", default=False,
         help="Skip tests in all maven goals")
@@ -453,55 +441,29 @@ def main():
         help="Sets github username. Used to add git remote with this github username", metavar="GITHUB_USERNAME")
     parser.add_option("-a", "--apps-home", dest="apps_home",
         help="Projects location directory (git clone directory)", metavar="APPS_DIR")
-    parser.add_option("-e", action="store_true", dest="echoMode", default=False,
+    parser.add_option("-e", "--echo", action="store_true", dest="echoMode", default=False,
         help="Echo mode. All external commands will not be executed")
-    parser.add_option("-R", "--reset", action="store_true", dest="resetGitRepos", default=False,
+    parser.add_option("--reset", action="store_true", dest="resetGitRepos", default=False,
         help="Reset all uncommitted changes")
+    parser.add_option("-u", "--update", action="store_true", dest="update", default=False,
+        help="Clone or update artifacts")
+    parser.add_option("-U", "--update-rebase", action="store_true", dest="rebase", default=False,
+        help="Clone or update artifacts and rebase to master. Merge conflicts may occur while rebasing")
 
-    parser.add_option("-u", "--update", action="store_const",
-        const="update", dest="action", help="Clone or update artifacts")
-    Repository.addAction(Action("update", gitCloneOrUpdate, silentMode=False, changedir=True, printName=False))
-    parser.add_option("-U", "--update-rebase", action="store_const",
-        const="rebase", dest="action", help="Clone or update artifacts with rebase. UNSAFE if conflict occurs while rebasing multiple projects")
-    Repository.addAction(Action("rebase", gitUpdateAndRebase, silentMode=False, changedir=True, printName=False))
-    parser.add_option("-l", "--list", action="store_const",
-        const="list", dest="action", help="List artifacts location dirs")
-    Repository.addAction(Action("list", listAction, silentMode=True, changedir=False, printName=False))
-    parser.add_option("-L", "--branch", action="store_const",
-        const="branch", dest="action", help="List urls of github branches")
-    Repository.addAction(Action("branch", listBranch, silentMode=True, changedir=True, printName=False))
-    parser.add_option("-i", "--info", action="store_const",
-        const="info", dest="action", help="Show info on last commits in working copy: author, date, message")
-    Repository.addAction(Action("info", gitInfo, silentMode=True, changedir=True, printName=True))
-    parser.add_option("-s", "--status", action="store_const",
-        const="status", dest="action", help="Show all artifacts with uncommitted changes")
-    Repository.addAction(Action("status", listStatus, silentMode=True, changedir=True, printName=False))
-    parser.add_option("-x", "--resolve", action="store_const",
-        const="resolve", dest="action", help="Resolve all maven dependencies")
-    Repository.addAction(MavenGoal("resolve", 'dependency:resolve dependency:resolve-plugins'))
-    parser.add_option("-d", "--deploy", action="store_const",
-        const="deploy", dest="action", help="Deploy artifacts")
-    Repository.addAction(MavenGoal("deploy", 'clean deploy', gitUpdate=True))
-    parser.add_option("-t", "--test", action="store_const",
-        const="test", dest="action", help="Run tests")
-    Repository.addAction(MavenGoal("test", '-o clean test'))
-    parser.add_option("-c", "--clean", action="store_const",
-        const="clean", dest="action", help="Clean")
-    Repository.addAction(MavenGoal("clean", '-o clean'))
+    addCliArgument(parser, "-l", "--dir",    help="List artifacts location dirs", action=lambda x: print(x.getAbsoluteLocationDir()), silentMode=True, changedir=False, printName=False)
+    addCliArgument(parser, "-L", "--branch", help="List urls of github branches", action=lambda x: print(x.getCurrentBranchGitHubUrl()), silentMode=True, changedir=True, printName=False)
+    addCliArgument(parser, "-i", "--info",   help="Show info on last commits in working copy: author, date, message",
+        action=lambda x: call('git --no-pager log --pretty=format:"%an %ar %B" -n 1'), silentMode=True, changedir=True, printName=True)
+    addCliArgument(parser, "-s", "--status", help="Show all artifacts with uncommitted changes", action=listStatus, silentMode=True, changedir=True, printName=False)
+    addCliArgument(parser, "-x", "--resolve",help="Resolve all maven dependencies", action='dependency:resolve dependency:resolve-plugins')
+    addCliArgument(parser, "-d", "--deploy", help="Deploy artifacts", action='clean deploy', gitUpdate=True)
+    addCliArgument(parser, "-t", "--test",   help="Run tests", action='clean test')
+    addCliArgument(parser, "-c", "--clean",  help="Resolve all maven dependencies", action='-o clean')
 
-    (options, args) = parser.parse_args()
-    global debug_mode
-    debug_mode = options.debug
-    global echoMode
-    echoMode = options.echoMode
-    global resetGitRepos
-    resetGitRepos = options.resetGitRepos
-    global action
-    action = options.action
-    global github_username
-    github_username = options.github_username
-    global skipTests
-    skipTests = options.skipTests
+    (parsed_options, args) = parser.parse_args()
+    print('parser.parse_args() args '  + str(len(args)))
+    global options
+    options = parsed_options
 
     global home_dir
     if options.apps_home:
@@ -510,8 +472,8 @@ def main():
             log("Dir apps-home is set to path: " + home_dir)
         else:
             log("Bad apps-home argument - path '%s' is not exists or not a directory!" % options.apps_home)
-            resetGitRepos = False
-            action = None
+            options.resetGitRepos = False
+            options.action = None
 
     import datetime
     now = datetime.datetime.now()
@@ -523,7 +485,7 @@ def main():
     log2file("options: " + str(options))
     log2file("artifacts: " + str(args))
 
-    if debug_mode:
+    if options.debug_mode:
         showExecutedCommands()
     showWarnings()
     log2file('All actions finished successfully')
