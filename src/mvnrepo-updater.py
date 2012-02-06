@@ -164,9 +164,9 @@ def doAction(args):
         warning("0 artifacts selected")
         return
     if options.action:
-        print(options.action + " will be executed on the following artifacts:")
+        log(options.action + " will be executed on the following artifacts:")
     for arg in selection:
-        print(arg.name)
+        log(arg.name)
 
     for artifact in selection:
         if options.update or options.rebase:
@@ -307,7 +307,7 @@ class MavenGoal(Action):
         changeDir(artifact)
         if not isGitRepo(artifact) or self.gitUpdate:
             gitCloneOrUpdate(artifact)
-        if switchBranch(artifact, artifact.branch):
+        if switchBranch(artifact):
             #TODO if self.gitUpdate: run git pull??
             maven(self.maven_command)
         else:
@@ -460,11 +460,21 @@ def log2file(mesg):
 def showDetailedInfo(path=os.getcwd()):
     for repo in Repository.artifacts:
         if path.lower().startswith(repo.getAbsoluteLocationDir().lower()):
+            print(repo.name)
             print("Location:")
             print(repo.getAbsoluteLocationDir())
             print(repo.getCurrentBranchGitHubUrl())
             print("Logs:")
             call('git --no-pager log --pretty=format:"%an %ar %B" -n 5')
+
+def gitLog(artifact):
+    call('git --no-pager log --pretty=format:"%an %ar %B" -n 1')
+
+def listDirs(artifact):
+    print(artifact.getAbsoluteLocationDir())
+
+def listBranchUrls(artifact):
+    print(artifact.getCurrentBranchGitHubUrl())
 
 #Binds commandline key and longKey to callback function
 def addCliArgument(parser, key, longKey, help, action, silentMode=False, changedir=True, printName=False, gitUpdate=False):
@@ -495,11 +505,10 @@ def main():
     parser.add_option("-U", "--update-rebase", action="store_true", dest="rebase", default=False,
         help="Clone or update artifacts and rebase to master. Merge conflicts may occur while rebasing")
 
-    addCliArgument(parser, "-l", "--dir",    help="List artifacts location dirs", action=lambda x: print(x.getAbsoluteLocationDir()), silentMode=True, changedir=False, printName=False)
-    addCliArgument(parser, "-L", "--branch", help="List urls of github branches", action=lambda x: print(x.getCurrentBranchGitHubUrl()), silentMode=True, changedir=True, printName=False)
-    addCliArgument(parser, "-i", "--info",   help="Show info on last commits in working copy: author, date, message",
-        action=lambda x: call('git --no-pager log --pretty=format:"%an %ar %B" -n 1'), silentMode=True, changedir=True, printName=True)
-    addCliArgument(parser, "-s", "--status", help="Show all artifacts with uncommitted changes", action=listStatus, silentMode=True, changedir=True, printName=False)
+    addCliArgument(parser, "-l", "--dir",    help="List artifacts location dirs", action=listDirs, silentMode=True, changedir=False)
+    addCliArgument(parser, "-L", "--branch", help="List urls of github branches", action=listBranchUrls, silentMode=True)
+    addCliArgument(parser, "-i", "--info",   help="Show info on last commits in working copy: author, date, message", action=gitLog, silentMode=True, printName=True)
+    addCliArgument(parser, "-s", "--status", help="Show all artifacts with uncommitted changes", action=listStatus, silentMode=True)
     addCliArgument(parser, "-x", "--resolve",help="Resolve all maven dependencies", action='dependency:resolve dependency:resolve-plugins')
     addCliArgument(parser, "-d", "--deploy", help="Deploy artifacts", action='clean deploy', gitUpdate=True)
     addCliArgument(parser, "-t", "--test",   help="Run tests", action='clean test')
@@ -523,7 +532,11 @@ def main():
     now = datetime.datetime.now()
     log2file('\n\t[%s]' % now.strftime("%Y-%m-%d %H:%M"))
     initArtifacts()
-    if not len(args):
+    if not len(args) and (options.action == '--dir' or options.action == '--branch' or options.action == '--info'
+        or options.action == '--status' or options.action == '--resolve' or options.action == '--clean'):
+        options.debug_mode = False
+        args.append('*')
+    elif not len(args):
         showDetailedInfo()
         exit(0)
     doAction(args)

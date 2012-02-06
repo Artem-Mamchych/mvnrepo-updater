@@ -12,6 +12,9 @@ python mvnrepo-updater.py -u *
 python mvnrepo-updater.py -U artifact_name
  - to update source code from upstream and rebase branch (only if current branch is not master)
 
+python mvnrepo-updater.py -s *
+ - to show all git repositories with uncommitted changes
+
 python mvnrepo-updater.py -t artifact_name
  - run mvn clean test
 
